@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-const INSERT_COUNTS: &[usize] = &[100, 1_000, 10_000];
+const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000];
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     let mut tokens = Vec::with_capacity(count);
@@ -43,32 +43,40 @@ fn bench_insert(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
-    for &count in INSERT_COUNTS {
-        let tokens = make_tokens(count, 0x5EED_u64);
+    for &count in PRELOAD_COUNTS {
+        let preload = make_tokens(count, 0x5EED_u64);
+        let insert_tokens = make_tokens(1, 0xBEE5_u64);
 
-        group.bench_with_input(BenchmarkId::new("bloom", count), &tokens, |b, tokens| {
+        group.bench_with_input(BenchmarkId::new("bloom", count), &insert_tokens, |b, tokens| {
             b.iter_batched(
-                || BloomFilterBox::with_rate(tokens.len(), 0.01),
-                |mut filter| {
-                    for token in tokens {
-                        filter.insert(black_box(token)).unwrap();
+                || {
+                    let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
+                    for token in &preload {
+                        filter.insert(token).unwrap();
                     }
+                    filter
+                },
+                |mut filter| {
+                    let token = &tokens[0];
+                    filter.insert(black_box(token)).unwrap();
                 },
                 BatchSize::SmallInput,
             );
         });
 
-        group.bench_with_input(BenchmarkId::new("redb", count), &tokens, |b, tokens| {
+        group.bench_with_input(BenchmarkId::new("redb", count), &insert_tokens, |b, tokens| {
             b.iter_batched(
                 || {
                     let path = temp_db_path("insert");
-                    let filter = RedbFilter::open(&path).expect("open redb");
+                    let mut filter = RedbFilter::open(&path).expect("open redb");
+                    for token in &preload {
+                        filter.insert(token).unwrap();
+                    }
                     (filter, path)
                 },
                 |(mut filter, path)| {
-                    for token in tokens {
-                        filter.insert(black_box(token)).unwrap();
-                    }
+                    let token = &tokens[0];
+                    filter.insert(black_box(token)).unwrap();
                     drop(filter);
                     let _ = std::fs::remove_file(path);
                 },
@@ -86,19 +94,18 @@ fn bench_test(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
-    for &count in INSERT_COUNTS {
+    for &count in PRELOAD_COUNTS {
         let existing = make_tokens(count, 0xBADC0DE_u64);
-        let missing = make_tokens(count, 0xD15EA5E_u64);
+        let missing = make_tokens(1, 0xD15EA5E_u64);
 
         group.bench_with_input(BenchmarkId::new("bloom_miss", count), &missing, |b, tokens| {
-            let mut filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
+            let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
             for token in &existing {
                 filter.insert(token).unwrap();
             }
             b.iter(|| {
-                for token in tokens {
-                    black_box(filter.test(black_box(token)));
-                }
+                let token = &tokens[0];
+                black_box(filter.test(black_box(token)));
             });
         });
 
@@ -109,9 +116,8 @@ fn bench_test(c: &mut Criterion) {
                 filter.insert(token).unwrap();
             }
             b.iter(|| {
-                for token in tokens {
-                    black_box(filter.test(black_box(token)));
-                }
+                let token = &tokens[0];
+                black_box(filter.test(black_box(token)));
             });
             drop(filter);
             let _ = std::fs::remove_file(path);
