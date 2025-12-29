@@ -4,15 +4,16 @@ use simple_filter_box::bloom_filter::bloom_filter::BloomFilterBox;
 use simple_filter_box::core::{FilterBox, bytes::Long};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{io, path::Path};
 use redb::{Database, TableDefinition};
 
-// const PRELOAD_COUNTS: &[usize] = &[1, 10, 100, 1_000];//&[100, 1_000, 10_000, 100_000, 1_000_000];
-// const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000];
-const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
+// const PRELOAD_COUNTS: &[usize] = &[10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000];
+// const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
+const PRELOAD_COUNTS: &[usize] = &[10_000, 20_000];
 const TOKEN_TABLE: TableDefinition<&[u8], u8> = TableDefinition::new("dedup_tokens");
 const SAMPLE_SIZE: usize = 100;
+const TARGET_TOKEN_COUNT: usize = 1024;
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     let mut tokens = Vec::with_capacity(count);
@@ -82,9 +83,10 @@ fn bench_insert(c: &mut Criterion) {
 
     for &count in PRELOAD_COUNTS {
         let preload = make_tokens(count, 0x5EED_u64);
-        let insert_tokens = make_tokens(1, 0xBEE5_u64);
+        let insert_tokens = make_tokens(TARGET_TOKEN_COUNT, 0xBEE5_u64);
 
         group.bench_with_input(BenchmarkId::new("bloom", count), &count, |b, &_count| {
+            let mut insert_index = 0usize;
             b.iter_batched(
                 || {
                     let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
@@ -94,7 +96,8 @@ fn bench_insert(c: &mut Criterion) {
                     filter
                 },
                 |mut filter| {
-                    let token = &insert_tokens[0];
+                    let token = &insert_tokens[insert_index % insert_tokens.len()];
+                    insert_index = insert_index.wrapping_add(1);
                     filter.insert(black_box(token)).unwrap();
                 },
                 BatchSize::SmallInput,
@@ -102,21 +105,25 @@ fn bench_insert(c: &mut Criterion) {
         });
 
         group.bench_with_input(BenchmarkId::new("redb", count), &count, |b, &_count| {
-            b.iter_batched(
-                || {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                let mut insert_index = 0usize;
+                for _ in 0..iters {
                     let path = temp_db_path("insert");
                     insert_batch(&path, &preload).unwrap();
                     let mut filter = RedbFilter::open(&path).expect("open redb");
-                    (filter, path)
-                },
-                |(mut filter, path)| {
-                    let token = &insert_tokens[0];
+
+                    let token = &insert_tokens[insert_index % insert_tokens.len()];
+                    insert_index = insert_index.wrapping_add(1);
+                    let start = Instant::now();
                     filter.insert(black_box(token)).unwrap();
+                    total += start.elapsed();
+
                     drop(filter);
                     let _ = std::fs::remove_file(path);
-                },
-                BatchSize::SmallInput,
-            );
+                }
+                total
+            });
         });
     }
 
@@ -131,15 +138,17 @@ fn bench_test(c: &mut Criterion) {
 
     for &count in PRELOAD_COUNTS {
         let existing = make_tokens(count, 0xBADC0DE_u64);
-        let missing = make_tokens(1, 0xD15EA5E_u64);
+        let missing = make_tokens(TARGET_TOKEN_COUNT, 0xD15EA5E_u64);
 
         group.bench_with_input(BenchmarkId::new("bloom_miss", count), &count, |b, &_count| {
             let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
             for token in &existing {
                 filter.insert(token).unwrap();
             }
+            let mut miss_index = 0usize;
             b.iter(|| {
-                let token = &missing[0];
+                let token = &missing[miss_index % missing.len()];
+                miss_index = miss_index.wrapping_add(1);
                 black_box(filter.test(black_box(token)));
             });
         });
@@ -148,8 +157,10 @@ fn bench_test(c: &mut Criterion) {
             let path = temp_db_path("test");
             insert_batch(&path, &existing).unwrap();
             let filter = RedbFilter::open(&path).expect("open redb");
+            let mut miss_index = 0usize;
             b.iter(|| {
-                let token = &missing[0];
+                let token = &missing[miss_index % missing.len()];
+                miss_index = miss_index.wrapping_add(1);
                 black_box(filter.test(black_box(token)));
             });
             drop(filter);
@@ -169,9 +180,10 @@ fn bench_insert_and_test(c: &mut Criterion) {
 
     for &count in PRELOAD_COUNTS {
         let preload = make_tokens(count, 0xABAD1DEA_u64);
-        let insert_tokens = make_tokens(1, 0x1CEB00DA_u64);
+        let insert_tokens = make_tokens(TARGET_TOKEN_COUNT, 0x1CEB00DA_u64);
 
         group.bench_with_input(BenchmarkId::new("bloom", count), &count, |b, &_count| {
+            let mut insert_index = 0usize;
             b.iter_batched(
                 || {
                     let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
@@ -181,7 +193,8 @@ fn bench_insert_and_test(c: &mut Criterion) {
                     filter
                 },
                 |mut filter| {
-                    let token = &insert_tokens[0];
+                    let token = &insert_tokens[insert_index % insert_tokens.len()];
+                    insert_index = insert_index.wrapping_add(1);
                     filter.insert(black_box(token)).unwrap();
                     black_box(filter.test(black_box(token)));
                 },
@@ -190,22 +203,26 @@ fn bench_insert_and_test(c: &mut Criterion) {
         });
 
         group.bench_with_input(BenchmarkId::new("redb", count), &count, |b, &_count| {
-            b.iter_batched(
-                || {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                let mut insert_index = 0usize;
+                for _ in 0..iters {
                     let path = temp_db_path("insert_test");
                     insert_batch(&path, &preload).unwrap();
                     let mut filter = RedbFilter::open(&path).expect("open redb");
-                    (filter, path)
-                },
-                |(mut filter, path)| {
-                    let token = &insert_tokens[0];
+
+                    let token = &insert_tokens[insert_index % insert_tokens.len()];
+                    insert_index = insert_index.wrapping_add(1);
+                    let start = Instant::now();
                     filter.insert(black_box(token)).unwrap();
                     black_box(filter.test(black_box(token)));
+                    total += start.elapsed();
+
                     drop(filter);
                     let _ = std::fs::remove_file(path);
-                },
-                BatchSize::SmallInput,
-            );
+                }
+                total
+            });
         });
     }
 
@@ -213,7 +230,7 @@ fn bench_insert_and_test(c: &mut Criterion) {
 }
 
 #[cfg(feature = "bench-insert-and-test")]
-criterion_group!(benches, bench_insert, bench_test, bench_insert_and_test);
+criterion_group!(benches, bench_insert_and_test);
 #[cfg(not(feature = "bench-insert-and-test"))]
 criterion_group!(benches, bench_insert, bench_test);
 criterion_main!(benches);
