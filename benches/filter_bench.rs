@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 // const PRELOAD_COUNTS: &[usize] = &[1, 10, 100, 1_000];//&[100, 1_000, 10_000, 100_000, 1_000_000];
-const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000];
+const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000];
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     let mut tokens = Vec::with_capacity(count);
@@ -128,5 +128,62 @@ fn bench_test(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "bench-insert-and-test")]
+fn bench_insert_and_test(c: &mut Criterion) {
+    let mut group = c.benchmark_group("insert_and_test");
+    group.sample_size(10);
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
+
+    for &count in PRELOAD_COUNTS {
+        let preload = make_tokens(count, 0xABAD1DEA_u64);
+        let insert_tokens = make_tokens(1, 0x1CEB00DA_u64);
+
+        group.bench_with_input(BenchmarkId::new("bloom", count), &count, |b, &_count| {
+            b.iter_batched(
+                || {
+                    let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
+                    for token in &preload {
+                        filter.insert(token).unwrap();
+                    }
+                    filter
+                },
+                |mut filter| {
+                    let token = &insert_tokens[0];
+                    filter.insert(black_box(token)).unwrap();
+                    black_box(filter.test(black_box(token)));
+                },
+                BatchSize::SmallInput,
+            );
+        });
+
+        group.bench_with_input(BenchmarkId::new("redb", count), &count, |b, &_count| {
+            b.iter_batched(
+                || {
+                    let path = temp_db_path("insert_test");
+                    let mut filter = RedbFilter::open(&path).expect("open redb");
+                    for token in &preload {
+                        filter.insert(token).unwrap();
+                    }
+                    (filter, path)
+                },
+                |(mut filter, path)| {
+                    let token = &insert_tokens[0];
+                    filter.insert(black_box(token)).unwrap();
+                    black_box(filter.test(black_box(token)));
+                    drop(filter);
+                    let _ = std::fs::remove_file(path);
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-insert-and-test")]
+criterion_group!(benches, bench_insert, bench_test, bench_insert_and_test);
+#[cfg(not(feature = "bench-insert-and-test"))]
 criterion_group!(benches, bench_insert, bench_test);
 criterion_main!(benches);
