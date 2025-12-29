@@ -16,11 +16,11 @@ fn open_database(path: &Path) -> io::Result<Database> {
     result.map_err(|err| io::Error::new(io::ErrorKind::Other, err))
 }
 
-pub struct RedbFilter {
+pub struct RedbFilterBox {
     db: Database,
 }
 
-impl RedbFilter {
+impl RedbFilterBox {
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let db = open_database(path.as_ref())?;
         let write_txn = db
@@ -36,7 +36,7 @@ impl RedbFilter {
     }
 }
 
-impl FilterBox for RedbFilter {
+impl FilterBox for RedbFilterBox {
     fn insert(&mut self, token: &Long) -> io::Result<()> {
         let write_txn = self.db.begin_write().map_err(|err| {
             eprintln!("failed to start redb write transaction: {err}");
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn insert_and_test_roundtrip() {
         let path = temp_db_path();
-        let mut filter = RedbFilter::open(&path).expect("open redb");
+        let mut filter = RedbFilterBox::open(&path).expect("open redb");
 
         let token1: Long = [1u8; 32];
         let token2: Long = [2u8; 32];

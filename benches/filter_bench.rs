@@ -1,5 +1,5 @@
 use criterion::{black_box, BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use simple_filter_box::binary_search::redb::RedbFilter;
+use simple_filter_box::binary_search::redb::RedbFilterBox;
 use simple_filter_box::bloom_filter::bloom_filter::BloomFilterBox;
 use simple_filter_box::core::{FilterBox, bytes::Long};
 use std::path::PathBuf;
@@ -62,7 +62,7 @@ fn bench_insert(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let path = temp_db_path("insert");
-                    let filter = RedbFilter::open(&path).expect("open redb");
+                    let filter = RedbFilterBox::open(&path).expect("open redb");
                     (filter, path)
                 },
                 |(mut filter, path)| {
@@ -104,7 +104,7 @@ fn bench_test(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("redb_miss", count), &missing, |b, tokens| {
             let path = temp_db_path("test");
-            let mut filter = RedbFilter::open(&path).expect("open redb");
+            let mut filter = RedbFilterBox::open(&path).expect("open redb");
             for token in &existing {
                 filter.insert(token).unwrap();
             }
