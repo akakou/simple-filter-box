@@ -1,6 +1,6 @@
 use criterion::{black_box, BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use simple_filter_box::binary_search::redb::RedbFilter;
-use simple_filter_box::bloom_filter::bloom_filter::BloomFilter;
+use simple_filter_box::bloom_filter::bloom_filter::BloomFilterBox;
 use simple_filter_box::core::{FilterBox, bytes::Long};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,7 +48,7 @@ fn bench_insert(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("bloom", count), &tokens, |b, tokens| {
             b.iter_batched(
-                || BloomFilter::with_rate(tokens.len(), 0.01),
+                || BloomFilterBox::with_rate(tokens.len(), 0.01),
                 |mut filter| {
                     for token in tokens {
                         filter.insert(black_box(token)).unwrap();
@@ -91,7 +91,7 @@ fn bench_test(c: &mut Criterion) {
         let missing = make_tokens(count, 0xD15EA5E_u64);
 
         group.bench_with_input(BenchmarkId::new("bloom_miss", count), &missing, |b, tokens| {
-            let mut filter = BloomFilter::with_rate(tokens.len(), 0.01);
+            let mut filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
             for token in &existing {
                 filter.insert(token).unwrap();
             }

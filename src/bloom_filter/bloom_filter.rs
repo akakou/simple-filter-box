@@ -4,11 +4,11 @@ use std::io;
 
 const BLOOM_SEED: [u8; 32] = [0u8; 32];
 
-pub struct BloomFilter {
+pub struct BloomFilterBox {
     inner: Bloom<Long>,
 }
 
-impl BloomFilter {
+impl BloomFilterBox {
     pub fn new(bit_len: usize, hash_functions: u32) -> Self {
         let bit_len = bit_len.max(8);
         let hash_functions = hash_functions.max(1);
@@ -35,7 +35,7 @@ impl BloomFilter {
     }
 }
 
-impl FilterBox for BloomFilter {
+impl FilterBox for BloomFilterBox {
     fn insert(&mut self, token: &Long) -> io::Result<()> {
         self.check_and_insert(token);
         Ok(())
@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn insert_changes_test_result() {
-        let mut filter = BloomFilter::new(8, 1);
+        let mut filter = BloomFilterBox::new(8, 1);
         let token: Long = [7u8; 32];
         assert!(filter.test(&token));
         filter.insert(&token).unwrap();
@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn with_rate_clamps_inputs() {
-        let mut filter = BloomFilter::with_rate(0, 1.0);
+        let mut filter = BloomFilterBox::with_rate(0, 1.0);
         let token: Long = [9u8; 32];
         assert!(filter.test(&token));
         filter.insert(&token).unwrap();
