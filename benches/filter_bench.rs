@@ -9,11 +9,11 @@ use std::{io, path::Path};
 use redb::{Database, TableDefinition};
 
 // const PRELOAD_COUNTS: &[usize] = &[10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000];
-// const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
-const PRELOAD_COUNTS: &[usize] = &[100,200];
+const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
+// const PRELOAD_COUNTS: &[usize] = &[100,200];
 const TOKEN_TABLE: TableDefinition<&[u8], u8> = TableDefinition::new("dedup_tokens");
-const SAMPLE_SIZE: usize = 10;
-// const SAMPLE_SIZE: usize = 100;
+// const SAMPLE_SIZE: usize = 10;
+const SAMPLE_SIZE: usize = 100;
 const TARGET_TOKEN_COUNT: usize = 1024;
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
