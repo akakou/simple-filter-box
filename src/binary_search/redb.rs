@@ -98,3 +98,45 @@ impl FilterBox for RedbFilter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path() -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        path.push(format!(
+            "simple_filter_box_test_{}_{}.redb",
+            std::process::id(),
+            nanos
+        ));
+        path
+    }
+
+    #[test]
+    fn insert_and_test_roundtrip() {
+        let path = temp_db_path();
+        let mut filter = RedbFilter::open(&path).expect("open redb");
+
+        let token1: Long = [1u8; 32];
+        let token2: Long = [2u8; 32];
+
+        assert!(filter.test(&token1));
+        assert!(filter.test(&token2));
+
+        filter.insert(&token1).unwrap();
+        assert!(!filter.test(&token1));
+        assert!(filter.test(&token2));
+
+        filter.insert(&token1).unwrap();
+        assert!(!filter.test(&token1));
+
+        drop(filter);
+        let _ = std::fs::remove_file(path);
+    }
+}

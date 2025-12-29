@@ -45,3 +45,26 @@ impl FilterBox for BloomFilter {
         !self.inner.check(token)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_changes_test_result() {
+        let mut filter = BloomFilter::new(8, 1);
+        let token: Long = [7u8; 32];
+        assert!(filter.test(&token));
+        filter.insert(&token).unwrap();
+        assert!(!filter.test(&token));
+    }
+
+    #[test]
+    fn with_rate_clamps_inputs() {
+        let mut filter = BloomFilter::with_rate(0, 1.0);
+        let token: Long = [9u8; 32];
+        assert!(filter.test(&token));
+        filter.insert(&token).unwrap();
+        assert!(!filter.test(&token));
+    }
+}
