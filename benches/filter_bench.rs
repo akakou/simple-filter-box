@@ -5,9 +5,14 @@ use simple_filter_box::core::{FilterBox, bytes::Long};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::{io, path::Path};
+use redb::{Database, TableDefinition};
 
 // const PRELOAD_COUNTS: &[usize] = &[1, 10, 100, 1_000];//&[100, 1_000, 10_000, 100_000, 1_000_000];
-const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000];
+// const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000];
+const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
+const TOKEN_TABLE: TableDefinition<&[u8], u8> = TableDefinition::new("dedup_tokens");
+const SAMPLE_SIZE: usize = 100;
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     let mut tokens = Vec::with_capacity(count);
@@ -38,9 +43,40 @@ fn temp_db_path(label: &str) -> PathBuf {
     path
 }
 
+fn open_database(path: &Path) -> io::Result<Database> {
+    let result = if path.exists() {
+        Database::open(path)
+    } else {
+        Database::create(path)
+    };
+    result.map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+}
+
+fn insert_batch(path: &Path, tokens: &[Long]) -> io::Result<()> {
+    let db = open_database(path)?;
+    let write_txn = db
+        .begin_write()
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    let mut table = write_txn
+        .open_table(TOKEN_TABLE)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+
+    for token in tokens {
+        table
+            .insert(&token[..], &1u8)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    }
+
+    drop(table);
+    write_txn
+        .commit()
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    Ok(())
+}
+
 fn bench_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert");
-    group.sample_size(10);
+    group.sample_size(SAMPLE_SIZE);
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
@@ -69,10 +105,8 @@ fn bench_insert(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let path = temp_db_path("insert");
+                    insert_batch(&path, &preload).unwrap();
                     let mut filter = RedbFilter::open(&path).expect("open redb");
-                    for token in &preload {
-                        filter.insert(token).unwrap();
-                    }
                     (filter, path)
                 },
                 |(mut filter, path)| {
@@ -91,7 +125,7 @@ fn bench_insert(c: &mut Criterion) {
 
 fn bench_test(c: &mut Criterion) {
     let mut group = c.benchmark_group("test");
-    group.sample_size(10);
+    group.sample_size(SAMPLE_SIZE);
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
@@ -112,10 +146,8 @@ fn bench_test(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("redb_miss", count), &count, |b, &_count| {
             let path = temp_db_path("test");
-            let mut filter = RedbFilter::open(&path).expect("open redb");
-            for token in &existing {
-                filter.insert(token).unwrap();
-            }
+            insert_batch(&path, &existing).unwrap();
+            let filter = RedbFilter::open(&path).expect("open redb");
             b.iter(|| {
                 let token = &missing[0];
                 black_box(filter.test(black_box(token)));
@@ -131,7 +163,7 @@ fn bench_test(c: &mut Criterion) {
 #[cfg(feature = "bench-insert-and-test")]
 fn bench_insert_and_test(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert_and_test");
-    group.sample_size(10);
+    group.sample_size(SAMPLE_SIZE);
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
@@ -161,10 +193,8 @@ fn bench_insert_and_test(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let path = temp_db_path("insert_test");
+                    insert_batch(&path, &preload).unwrap();
                     let mut filter = RedbFilter::open(&path).expect("open redb");
-                    for token in &preload {
-                        filter.insert(token).unwrap();
-                    }
                     (filter, path)
                 },
                 |(mut filter, path)| {
