@@ -1,0 +1,8 @@
+[package]
+name = "simple-filter-box"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bloomfilter = "3"
+redb = "3.1.0"
