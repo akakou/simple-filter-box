@@ -29,15 +29,11 @@ impl BloomFilterBox {
             .expect("bloomfilter init should succeed");
         Self { inner }
     }
-
-    pub fn check_and_insert(&mut self, token: &Long) {
-        self.inner.set(token);
-    }
 }
 
 impl FilterBox for BloomFilterBox {
     fn insert(&mut self, token: &Long) -> io::Result<()> {
-        self.check_and_insert(token);
+        self.inner.set(token);
         Ok(())
     }
 

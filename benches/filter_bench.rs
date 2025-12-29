@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000];
+// const PRELOAD_COUNTS: &[usize] = &[1, 10, 100, 1_000];//&[100, 1_000, 10_000, 100_000, 1_000_000];
+const PRELOAD_COUNTS: &[usize] = &[100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000];
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     let mut tokens = Vec::with_capacity(count);
@@ -47,7 +48,7 @@ fn bench_insert(c: &mut Criterion) {
         let preload = make_tokens(count, 0x5EED_u64);
         let insert_tokens = make_tokens(1, 0xBEE5_u64);
 
-        group.bench_with_input(BenchmarkId::new("bloom", count), &insert_tokens, |b, tokens| {
+        group.bench_with_input(BenchmarkId::new("bloom", count), &count, |b, &_count| {
             b.iter_batched(
                 || {
                     let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
@@ -57,14 +58,14 @@ fn bench_insert(c: &mut Criterion) {
                     filter
                 },
                 |mut filter| {
-                    let token = &tokens[0];
+                    let token = &insert_tokens[0];
                     filter.insert(black_box(token)).unwrap();
                 },
                 BatchSize::SmallInput,
             );
         });
 
-        group.bench_with_input(BenchmarkId::new("redb", count), &insert_tokens, |b, tokens| {
+        group.bench_with_input(BenchmarkId::new("redb", count), &count, |b, &_count| {
             b.iter_batched(
                 || {
                     let path = temp_db_path("insert");
@@ -75,7 +76,7 @@ fn bench_insert(c: &mut Criterion) {
                     (filter, path)
                 },
                 |(mut filter, path)| {
-                    let token = &tokens[0];
+                    let token = &insert_tokens[0];
                     filter.insert(black_box(token)).unwrap();
                     drop(filter);
                     let _ = std::fs::remove_file(path);
@@ -98,25 +99,25 @@ fn bench_test(c: &mut Criterion) {
         let existing = make_tokens(count, 0xBADC0DE_u64);
         let missing = make_tokens(1, 0xD15EA5E_u64);
 
-        group.bench_with_input(BenchmarkId::new("bloom_miss", count), &missing, |b, tokens| {
+        group.bench_with_input(BenchmarkId::new("bloom_miss", count), &count, |b, &_count| {
             let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
             for token in &existing {
                 filter.insert(token).unwrap();
             }
             b.iter(|| {
-                let token = &tokens[0];
+                let token = &missing[0];
                 black_box(filter.test(black_box(token)));
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("redb_miss", count), &missing, |b, tokens| {
+        group.bench_with_input(BenchmarkId::new("redb_miss", count), &count, |b, &_count| {
             let path = temp_db_path("test");
             let mut filter = RedbFilter::open(&path).expect("open redb");
             for token in &existing {
                 filter.insert(token).unwrap();
             }
             b.iter(|| {
-                let token = &tokens[0];
+                let token = &missing[0];
                 black_box(filter.test(black_box(token)));
             });
             drop(filter);
