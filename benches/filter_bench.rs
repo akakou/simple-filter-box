@@ -11,14 +11,21 @@ use std::time::{Duration, Instant};
 use std::{io, path::Path};
 
 const PRELOAD_COUNTS: &[usize] = &[
-    10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000,
+    1_000_000, 2_000_000, 3_000_000, 4_000_000, 
+    5_000_000, 6_000_000, 7_000_000, 8_000_000, 9_000_000,
+    // 100_000, 110_000, 120_000, 130_000, 140_000, 150_000, 160_000, 170_000, 180_000,
 ];
+
+// const PRELOAD_COUNTS: &[usize] = &[
+//     10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000,
+//     100_000, 110_000, 120_000, 130_000, 140_000, 150_000, 160_000, 170_000, 180_000,
+// ];
 // const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
 // const PRELOAD_COUNTS: &[usize] = &[100,200];
 const TOKEN_TABLE: TableDefinition<&[u8], u8> = TableDefinition::new("dedup_tokens");
 // const SAMPLE_SIZE: usize = 10;
-const SAMPLE_SIZE: usize = 100;
-const TARGET_TOKEN_COUNT: usize = 1024;
+const SAMPLE_SIZE: usize = 200;
+const TARGET_TOKEN_COUNT: usize = 1000;
 
 #[derive(Copy, Clone)]
 enum DbBackend {
@@ -153,6 +160,16 @@ fn open_sqlite(path: &Path) -> io::Result<Connection> {
         [],
     )
     .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    
+    // avoid cache effect 
+    conn.execute_batch(
+        "PRAGMA cache_size = -2000;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA mmap_size = 0;
+         PRAGMA journal_mode = DELETE;
+         PRAGMA synchronous = FULL;",
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     Ok(conn)
 }
 
@@ -179,9 +196,20 @@ fn insert_batch_sqlite_tx(tx: &Transaction<'_>, tokens: &[Long]) -> io::Result<(
 }
 
 fn bench_backends() -> Vec<BenchBackend> {
-    let mut backends = vec![BenchBackend::Bloom];
-    backends.push(BenchBackend::from(DbBackend::from_env()));
-    backends
+    let db_backend = BenchBackend::from(DbBackend::from_env());
+    match std::env::var("FILTER_BENCH").ok().as_deref() {
+        Some("bloom") => vec![BenchBackend::Bloom],
+        Some("redb") => vec![BenchBackend::Redb],
+        Some("sqlite") => vec![BenchBackend::Sqlite],
+        Some(other) => {
+            eprintln!(
+                "unknown FILTER_BENCH={other}, defaulting to bloom + {} (use 'bloom', 'redb', or 'sqlite')",
+                db_backend.label()
+            );
+            vec![BenchBackend::Bloom, db_backend]
+        }
+        None => vec![BenchBackend::Bloom, db_backend],
+    }
 }
 
 fn prepare_filter(
