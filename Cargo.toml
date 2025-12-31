@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bloomfilter = "3"
 redb = "3.1.0"
+rusqlite = "0.31"
 
 [dev-dependencies]
 criterion = "0.5"
