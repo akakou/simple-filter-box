@@ -1,20 +1,89 @@
-use criterion::{black_box, BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{black_box, BenchmarkId, Criterion, criterion_group, criterion_main};
+use redb::{Database, TableDefinition};
+use rusqlite::{Connection, Transaction};
 use simple_filter_box::binary_search::redb::RedbFilter;
+use simple_filter_box::binary_search::sqlite::SqliteFilter;
 use simple_filter_box::bloom_filter::bloom_filter::BloomFilterBox;
 use simple_filter_box::core::{FilterBox, bytes::Long};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use std::{io, path::Path};
-use redb::{Database, TableDefinition};
 
-// const PRELOAD_COUNTS: &[usize] = &[10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000];
-const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
+const PRELOAD_COUNTS: &[usize] = &[
+    10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000,
+];
+// const PRELOAD_COUNTS: &[usize] = &[100_000, 200_000, 300_000, 400_000, 500_000, 600_000, 700_000, 800_000, 900_000];
 // const PRELOAD_COUNTS: &[usize] = &[100,200];
 const TOKEN_TABLE: TableDefinition<&[u8], u8> = TableDefinition::new("dedup_tokens");
 // const SAMPLE_SIZE: usize = 10;
 const SAMPLE_SIZE: usize = 100;
 const TARGET_TOKEN_COUNT: usize = 1024;
+
+#[derive(Copy, Clone)]
+enum DbBackend {
+    Redb,
+    Sqlite,
+}
+
+impl DbBackend {
+    fn from_env() -> Self {
+        match std::env::var("FILTER_BACKEND").ok().as_deref() {
+            Some("sqlite") => DbBackend::Sqlite,
+            Some("redb") | None => DbBackend::Redb,
+            Some(other) => {
+                eprintln!(
+                    "unknown FILTER_BACKEND={other}, defaulting to redb (use 'redb' or 'sqlite')"
+                );
+                DbBackend::Redb
+            }
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            DbBackend::Redb => "redb",
+            DbBackend::Sqlite => "sqlite",
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+enum BenchBackend {
+    Bloom,
+    Redb,
+    Sqlite,
+}
+
+impl BenchBackend {
+    fn label(self) -> &'static str {
+        match self {
+            BenchBackend::Bloom => "bloom",
+            BenchBackend::Redb => "redb",
+            BenchBackend::Sqlite => "sqlite",
+        }
+    }
+}
+
+impl From<DbBackend> for BenchBackend {
+    fn from(value: DbBackend) -> Self {
+        match value {
+            DbBackend::Redb => BenchBackend::Redb,
+            DbBackend::Sqlite => BenchBackend::Sqlite,
+        }
+    }
+}
+
+struct PreparedFilter {
+    filter: Box<dyn FilterBox>,
+    path: Option<PathBuf>,
+}
+
+impl PreparedFilter {
+    fn into_parts(self) -> (Box<dyn FilterBox>, Option<PathBuf>) {
+        (self.filter, self.path)
+    }
+}
 
 fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     let mut tokens = Vec::with_capacity(count);
@@ -32,15 +101,16 @@ fn make_tokens(count: usize, seed: u64) -> Vec<Long> {
     tokens
 }
 
-fn temp_db_path(label: &str) -> PathBuf {
+fn temp_db_path(label: &str, extension: &str) -> PathBuf {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let mut path = std::env::temp_dir();
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
     path.push(format!(
-        "simple_filter_box_bench_{}_{}_{}.redb",
+        "simple_filter_box_bench_{}_{}_{}.{}",
         std::process::id(),
         label,
-        id
+        id,
+        extension
     ));
     path
 }
@@ -54,7 +124,7 @@ fn open_database(path: &Path) -> io::Result<Database> {
     result.map_err(|err| io::Error::new(io::ErrorKind::Other, err))
 }
 
-fn insert_batch(path: &Path, tokens: &[Long]) -> io::Result<()> {
+fn insert_batch_redb(path: &Path, tokens: &[Long]) -> io::Result<()> {
     let db = open_database(path)?;
     let write_txn = db
         .begin_write()
@@ -76,7 +146,89 @@ fn insert_batch(path: &Path, tokens: &[Long]) -> io::Result<()> {
     Ok(())
 }
 
+fn open_sqlite(path: &Path) -> io::Result<Connection> {
+    let conn = Connection::open(path).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    conn.execute(
+        "create table if not exists dedup_tokens (token blob primary key)",
+        [],
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    Ok(conn)
+}
+
+fn insert_batch_sqlite(path: &Path, tokens: &[Long]) -> io::Result<()> {
+    let mut conn = open_sqlite(path)?;
+    let tx = conn
+        .transaction()
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    insert_batch_sqlite_tx(&tx, tokens)?;
+    tx.commit()
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    Ok(())
+}
+
+fn insert_batch_sqlite_tx(tx: &Transaction<'_>, tokens: &[Long]) -> io::Result<()> {
+    let mut stmt = tx
+        .prepare("insert or ignore into dedup_tokens (token) values (?1)")
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    for token in tokens {
+        stmt.execute([&token[..]])
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    }
+    Ok(())
+}
+
+fn bench_backends() -> Vec<BenchBackend> {
+    let mut backends = vec![BenchBackend::Bloom];
+    backends.push(BenchBackend::from(DbBackend::from_env()));
+    backends
+}
+
+fn prepare_filter(
+    backend: BenchBackend,
+    preload: &[Long],
+    label: &str,
+) -> io::Result<PreparedFilter> {
+    match backend {
+        BenchBackend::Bloom => {
+            let mut filter = BloomFilterBox::with_rate(preload.len() + 1, 0.01);
+            for token in preload {
+                filter.insert(token)?;
+            }
+            Ok(PreparedFilter {
+                filter: Box::new(filter),
+                path: None,
+            })
+        }
+        BenchBackend::Redb => {
+            let path = temp_db_path(label, DbBackend::Redb.extension());
+            insert_batch_redb(&path, preload)?;
+            let filter = RedbFilter::open(&path)?;
+            Ok(PreparedFilter {
+                filter: Box::new(filter),
+                path: Some(path),
+            })
+        }
+        BenchBackend::Sqlite => {
+            let path = temp_db_path(label, DbBackend::Sqlite.extension());
+            insert_batch_sqlite(&path, preload)?;
+            let filter = SqliteFilter::open(&path)?;
+            Ok(PreparedFilter {
+                filter: Box::new(filter),
+                path: Some(path),
+            })
+        }
+    }
+}
+
+fn cleanup_path(path: Option<PathBuf>) {
+    if let Some(path) = path {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn bench_insert(c: &mut Criterion) {
+    let backends = bench_backends();
     let mut group = c.benchmark_group("insert");
     group.sample_size(SAMPLE_SIZE);
     group.warm_up_time(Duration::from_secs(1));
@@ -86,52 +238,36 @@ fn bench_insert(c: &mut Criterion) {
         let preload = make_tokens(count, 0x5EED_u64);
         let insert_tokens = make_tokens(TARGET_TOKEN_COUNT, 0xBEE5_u64);
 
-        group.bench_with_input(BenchmarkId::new("bloom", count), &count, |b, &_count| {
-            let mut insert_index = 0usize;
-            b.iter_batched(
-                || {
-                    let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
-                    for token in &preload {
-                        filter.insert(token).unwrap();
+        for backend in &backends {
+            group.bench_with_input(BenchmarkId::new(backend.label(), count), &count, |b, &_count| {
+                let backend = *backend;
+                b.iter_custom(|iters| {
+                    let mut total = Duration::ZERO;
+                    let mut insert_index = 0usize;
+                    for _ in 0..iters {
+                        let (mut filter, path) =
+                            prepare_filter(backend, &preload, "insert").unwrap().into_parts();
+
+                        let token = &insert_tokens[insert_index % insert_tokens.len()];
+                        insert_index = insert_index.wrapping_add(1);
+                        let start = Instant::now();
+                        filter.insert(black_box(token)).unwrap();
+                        total += start.elapsed();
+
+                        drop(filter);
+                        cleanup_path(path);
                     }
-                    filter
-                },
-                |mut filter| {
-                    let token = &insert_tokens[insert_index % insert_tokens.len()];
-                    insert_index = insert_index.wrapping_add(1);
-                    filter.insert(black_box(token)).unwrap();
-                },
-                BatchSize::SmallInput,
-            );
-        });
-
-        group.bench_with_input(BenchmarkId::new("redb", count), &count, |b, &_count| {
-            b.iter_custom(|iters| {
-                let mut total = Duration::ZERO;
-                let mut insert_index = 0usize;
-                for _ in 0..iters {
-                    let path = temp_db_path("insert");
-                    insert_batch(&path, &preload).unwrap();
-                    let mut filter = RedbFilter::open(&path).expect("open redb");
-
-                    let token = &insert_tokens[insert_index % insert_tokens.len()];
-                    insert_index = insert_index.wrapping_add(1);
-                    let start = Instant::now();
-                    filter.insert(black_box(token)).unwrap();
-                    total += start.elapsed();
-
-                    drop(filter);
-                    let _ = std::fs::remove_file(path);
-                }
-                total
+                    total
+                });
             });
-        });
+        }
     }
 
     group.finish();
 }
 
 fn bench_test(c: &mut Criterion) {
+    let backends = bench_backends();
     let mut group = c.benchmark_group("test");
     group.sample_size(SAMPLE_SIZE);
     group.warm_up_time(Duration::from_secs(1));
@@ -141,32 +277,26 @@ fn bench_test(c: &mut Criterion) {
         let existing = make_tokens(count, 0xBADC0DE_u64);
         let missing = make_tokens(TARGET_TOKEN_COUNT, 0xD15EA5E_u64);
 
-        group.bench_with_input(BenchmarkId::new("bloom_miss", count), &count, |b, &_count| {
-            let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
-            for token in &existing {
-                filter.insert(token).unwrap();
-            }
-            let mut miss_index = 0usize;
-            b.iter(|| {
-                let token = &missing[miss_index % missing.len()];
-                miss_index = miss_index.wrapping_add(1);
-                black_box(filter.test(black_box(token)));
-            });
-        });
-
-        group.bench_with_input(BenchmarkId::new("redb_miss", count), &count, |b, &_count| {
-            let path = temp_db_path("test");
-            insert_batch(&path, &existing).unwrap();
-            let filter = RedbFilter::open(&path).expect("open redb");
-            let mut miss_index = 0usize;
-            b.iter(|| {
-                let token = &missing[miss_index % missing.len()];
-                miss_index = miss_index.wrapping_add(1);
-                black_box(filter.test(black_box(token)));
-            });
-            drop(filter);
-            let _ = std::fs::remove_file(path);
-        });
+        for backend in &backends {
+            group.bench_with_input(
+                BenchmarkId::new(format!("{}_miss", backend.label()), count),
+                &count,
+                |b, &_count| {
+                    let backend = *backend;
+                    let (filter, path) =
+                        prepare_filter(backend, &existing, "test").unwrap().into_parts();
+                    let mut filter = filter;
+                    let mut miss_index = 0usize;
+                    b.iter(|| {
+                        let token = &missing[miss_index % missing.len()];
+                        miss_index = miss_index.wrapping_add(1);
+                        black_box(filter.test(black_box(token)));
+                    });
+                    drop(filter);
+                    cleanup_path(path);
+                },
+            );
+        }
     }
 
     group.finish();
@@ -174,6 +304,7 @@ fn bench_test(c: &mut Criterion) {
 
 #[cfg(feature = "bench-insert-and-test")]
 fn bench_insert_and_test(c: &mut Criterion) {
+    let backends = bench_backends();
     let mut group = c.benchmark_group("insert_and_test");
     group.sample_size(SAMPLE_SIZE);
     group.warm_up_time(Duration::from_secs(1));
@@ -183,48 +314,31 @@ fn bench_insert_and_test(c: &mut Criterion) {
         let preload = make_tokens(count, 0xABAD1DEA_u64);
         let insert_tokens = make_tokens(TARGET_TOKEN_COUNT, 0x1CEB00DA_u64);
 
-        group.bench_with_input(BenchmarkId::new("bloom", count), &count, |b, &_count| {
-            let mut insert_index = 0usize;
-            b.iter_batched(
-                || {
-                    let mut filter = BloomFilterBox::with_rate(count + 1, 0.01);
-                    for token in &preload {
-                        filter.insert(token).unwrap();
+        for backend in &backends {
+            group.bench_with_input(BenchmarkId::new(backend.label(), count), &count, |b, &_count| {
+                let backend = *backend;
+                b.iter_custom(|iters| {
+                    let mut total = Duration::ZERO;
+                    let mut insert_index = 0usize;
+                    for _ in 0..iters {
+                        let (mut filter, path) = prepare_filter(backend, &preload, "insert_test")
+                            .unwrap()
+                            .into_parts();
+
+                        let token = &insert_tokens[insert_index % insert_tokens.len()];
+                        insert_index = insert_index.wrapping_add(1);
+                        let start = Instant::now();
+                        filter.insert(black_box(token)).unwrap();
+                        black_box(filter.test(black_box(token)));
+                        total += start.elapsed();
+
+                        drop(filter);
+                        cleanup_path(path);
                     }
-                    filter
-                },
-                |mut filter| {
-                    let token = &insert_tokens[insert_index % insert_tokens.len()];
-                    insert_index = insert_index.wrapping_add(1);
-                    filter.insert(black_box(token)).unwrap();
-                    black_box(filter.test(black_box(token)));
-                },
-                BatchSize::SmallInput,
-            );
-        });
-
-        group.bench_with_input(BenchmarkId::new("redb", count), &count, |b, &_count| {
-            b.iter_custom(|iters| {
-                let mut total = Duration::ZERO;
-                let mut insert_index = 0usize;
-                for _ in 0..iters {
-                    let path = temp_db_path("insert_test");
-                    insert_batch(&path, &preload).unwrap();
-                    let mut filter = RedbFilter::open(&path).expect("open redb");
-
-                    let token = &insert_tokens[insert_index % insert_tokens.len()];
-                    insert_index = insert_index.wrapping_add(1);
-                    let start = Instant::now();
-                    filter.insert(black_box(token)).unwrap();
-                    black_box(filter.test(black_box(token)));
-                    total += start.elapsed();
-
-                    drop(filter);
-                    let _ = std::fs::remove_file(path);
-                }
-                total
+                    total
+                });
             });
-        });
+        }
     }
 
     group.finish();
