@@ -2,7 +2,7 @@ use crate::core::{bytes::Long, FilterBox};
 use rusqlite::{Connection, OptionalExtension};
 use std::{
     io,
-    path::{Path, PathBuf},
+    path::{Path},
 };
 
 const CREATE_TABLE_SQL: &str = r#"
@@ -25,6 +25,10 @@ impl SqliteFilter {
 }
 
 impl FilterBox for SqliteFilter {
+    fn from_entries(tokens: &[Long]) -> io::Result<Self> {
+        todo!();
+    }
+
     fn insert(&mut self, token: &Long) -> io::Result<()> {
         self.conn
             .execute(
@@ -62,6 +66,7 @@ impl FilterBox for SqliteFilter {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::PathBuf;
 
     fn temp_db_path() -> PathBuf {
         let mut path = std::env::temp_dir();

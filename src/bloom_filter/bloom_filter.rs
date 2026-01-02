@@ -32,6 +32,16 @@ impl BloomFilterBox {
 }
 
 impl FilterBox for BloomFilterBox {
+    fn from_entries(tokens: &[Long]) -> io::Result<Self> {
+        let mut filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
+
+        for t in tokens {
+            filter.insert(&t)?;
+        }
+
+        Ok(filter)
+    }
+
     fn insert(&mut self, token: &Long) -> io::Result<()> {
         self.inner.set(token);
         Ok(())
