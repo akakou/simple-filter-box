@@ -3,7 +3,7 @@ use redb::{Database, TableDefinition};
 use rusqlite::{Connection, Transaction};
 use simple_filter_box::binary_search::redb::RedbFilter;
 use simple_filter_box::binary_search::sqlite::SqliteFilter;
-use simple_filter_box::bloom_filter::bloom_filter::BloomFilterBox;
+use simple_filter_box::bloom_filter::BloomFilterBox;
 use simple_filter_box::core::{FilterBox, bytes::Long};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
