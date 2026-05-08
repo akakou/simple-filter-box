@@ -1,11 +1,13 @@
 pub mod core;
-pub mod binary_search;
-pub mod bloom_filter;
-pub mod dashmap;
+#[cfg(feature = "binary_search")]
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod binary_search;
+
+#[cfg(feature = "bloom_filter")]
+pub mod bloom_filter;
+
+#[cfg(feature = "dashmap")]
+pub mod dashmap;
 
 #[cfg(test)]
 mod tests {
