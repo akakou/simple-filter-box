@@ -13,8 +13,10 @@ dashmap = "6.1.0"
 criterion = "0.5"
 
 [features]
-default = [ "bloom_filter", "binary_search", "sqlite" ]
+default = ["bloom_filter", "binary_search", "sqlite"]
+
 bench-insert-and-test = []
+bloom_filter = []
 binary_search = []
 sqlite = []
 dashmap = []
