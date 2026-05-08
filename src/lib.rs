@@ -1,7 +1,7 @@
 pub mod core;
 pub mod binary_search;
 pub mod bloom_filter;
-pub mod hashmap;
+pub mod dashmap;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

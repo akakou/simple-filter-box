@@ -1,34 +1,35 @@
+use dashmap::DashMap;
+
 use crate::core::{FilterBox, bytes::Long};
-use std::collections::HashMap;
 use std::io;
 
-pub struct HashMapFilterBox {
-    inner: HashMap<Long, ()>,
+pub struct DashMapFilterBox {
+    inner: DashMap<Long, ()>,
 }
 
-impl HashMapFilterBox {
+impl DashMapFilterBox {
     pub fn new() -> Self {
         Self {
-            inner: HashMap::new(),
+            inner: DashMap::new(),
         }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            inner: HashMap::with_capacity(capacity),
+            inner: DashMap::with_capacity(capacity),
         }
     }
 }
 
-impl Default for HashMapFilterBox {
+impl Default for DashMapFilterBox {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl FilterBox for HashMapFilterBox {
+impl FilterBox for DashMapFilterBox {
     fn from_entries(tokens: &[Long]) -> io::Result<Self> {
-        let mut filter = HashMapFilterBox::with_capacity(tokens.len());
+        let mut filter = DashMapFilterBox::with_capacity(tokens.len());
         for token in tokens {
             filter.insert(token)?;
         }
@@ -51,7 +52,7 @@ mod tests {
 
     #[test]
     fn insert_changes_test_result() {
-        let mut filter = HashMapFilterBox::new();
+        let mut filter = DashMapFilterBox::new();
         let token: Long = [7u8; 32];
         assert!(filter.test(&token));
         filter.insert(&token).unwrap();
@@ -60,7 +61,7 @@ mod tests {
 
     #[test]
     fn duplicate_insert_is_idempotent() {
-        let mut filter = HashMapFilterBox::new();
+        let mut filter = DashMapFilterBox::new();
         let token: Long = [9u8; 32];
         filter.insert(&token).unwrap();
         filter.insert(&token).unwrap();
@@ -73,7 +74,7 @@ mod tests {
         let token_b: Long = [2u8; 32];
         let token_c: Long = [3u8; 32];
 
-        let filter = HashMapFilterBox::from_entries(&[token_a, token_b]).unwrap();
+        let filter = DashMapFilterBox::from_entries(&[token_a, token_b]).unwrap();
         assert!(!filter.test(&token_a));
         assert!(!filter.test(&token_b));
         assert!(filter.test(&token_c));
