@@ -1,4 +1,4 @@
-use dashmap::DashMap;
+use dashmap::{DashMap, mapref::entry::Entry as DashEntry};
 
 use crate::core::{FilterBox, bytes::Long};
 use std::io;
@@ -29,20 +29,30 @@ impl Default for DashMapFilterBox {
 
 impl FilterBox for DashMapFilterBox {
     fn from_entries(tokens: &[Long]) -> io::Result<Self> {
-        let mut filter = DashMapFilterBox::with_capacity(tokens.len());
+        let filter = DashMapFilterBox::with_capacity(tokens.len());
         for token in tokens {
             filter.insert(token)?;
         }
         Ok(filter)
     }
 
-    fn insert(&mut self, token: &Long) -> io::Result<()> {
+    fn insert(&self, token: &Long) -> io::Result<()> {
         self.inner.insert(*token, ());
         Ok(())
     }
 
     fn test(&self, token: &Long) -> bool {
         !self.inner.contains_key(token)
+    }
+
+    fn test_and_insert(&self, token: &Long) -> io::Result<bool> {
+        match self.inner.entry(*token) {
+            DashEntry::Occupied(_) => Ok(false),
+            DashEntry::Vacant(entry) => {
+                entry.insert(());
+                Ok(true)
+            }
+        }
     }
 }
 

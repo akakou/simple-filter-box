@@ -1,9 +1,6 @@
-use crate::core::{bytes::Long, FilterBox};
+use crate::core::{FilterBox, bytes::Long};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use std::{
-    io,
-    path::Path,
-};
+use std::{io, path::Path};
 
 const TOKEN_TABLE: TableDefinition<&[u8], u8> = TableDefinition::new("dedup_tokens");
 
@@ -37,11 +34,11 @@ impl RedbFilter {
 }
 
 impl FilterBox for RedbFilter {
-    fn from_entries(tokens: &[Long]) -> io::Result<Self> {
+    fn from_entries(_tokens: &[Long]) -> io::Result<Self> {
         todo!();
     }
 
-    fn insert(&mut self, token: &Long) -> io::Result<()> {
+    fn insert(&self, token: &Long) -> io::Result<()> {
         let write_txn = self.db.begin_write().map_err(|err| {
             eprintln!("failed to start redb write transaction: {err}");
             io::Error::new(io::ErrorKind::Other, err)
