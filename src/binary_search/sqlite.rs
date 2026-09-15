@@ -27,7 +27,7 @@ impl FilterBox for SqliteFilter {
         todo!();
     }
 
-    fn insert(&self, token: &Long) -> io::Result<()> {
+    fn insert(&mut self, token: &Long) -> io::Result<()> {
         self.conn
             .execute(
                 "insert or ignore into dedup_tokens (token) values (?1)",

@@ -38,7 +38,7 @@ impl BloomFilterBox {
 
 impl FilterBox for BloomFilterBox {
     fn from_entries(tokens: &[Long]) -> io::Result<Self> {
-        let filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
+        let mut filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
 
         for t in tokens {
             filter.insert(&t)?;
@@ -47,7 +47,7 @@ impl FilterBox for BloomFilterBox {
         Ok(filter)
     }
 
-    fn insert(&self, token: &Long) -> io::Result<()> {
+    fn insert(&mut self, token: &Long) -> io::Result<()> {
         self.inner
             .lock()
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "bloom filter lock poisoned"))?
@@ -62,7 +62,7 @@ impl FilterBox for BloomFilterBox {
             .unwrap_or(false)
     }
 
-    fn test_and_insert(&self, token: &Long) -> io::Result<bool> {
+    fn test_and_insert(&mut self, token: &Long) -> io::Result<bool> {
         let mut inner = self
             .inner
             .lock()

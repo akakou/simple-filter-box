@@ -29,14 +29,14 @@ impl Default for DashMapFilterBox {
 
 impl FilterBox for DashMapFilterBox {
     fn from_entries(tokens: &[Long]) -> io::Result<Self> {
-        let filter = DashMapFilterBox::with_capacity(tokens.len());
+        let mut filter = DashMapFilterBox::with_capacity(tokens.len());
         for token in tokens {
             filter.insert(token)?;
         }
         Ok(filter)
     }
 
-    fn insert(&self, token: &Long) -> io::Result<()> {
+    fn insert(&mut self, token: &Long) -> io::Result<()> {
         self.inner.insert(*token, ());
         Ok(())
     }
@@ -45,7 +45,7 @@ impl FilterBox for DashMapFilterBox {
         !self.inner.contains_key(token)
     }
 
-    fn test_and_insert(&self, token: &Long) -> io::Result<bool> {
+    fn test_and_insert(&mut self, token: &Long) -> io::Result<bool> {
         match self.inner.entry(*token) {
             DashEntry::Occupied(_) => Ok(false),
             DashEntry::Vacant(entry) => {

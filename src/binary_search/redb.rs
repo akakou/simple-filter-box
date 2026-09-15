@@ -38,7 +38,7 @@ impl FilterBox for RedbFilter {
         todo!();
     }
 
-    fn insert(&self, token: &Long) -> io::Result<()> {
+    fn insert(&mut self, token: &Long) -> io::Result<()> {
         let write_txn = self.db.begin_write().map_err(|err| {
             eprintln!("failed to start redb write transaction: {err}");
             io::Error::new(io::ErrorKind::Other, err)

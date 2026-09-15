@@ -19,10 +19,10 @@ pub trait FilterBox {
     fn from_entries(token: &[Long]) -> io::Result<Self>
     where
         Self: Sized;
-    fn insert(&self, token: &Entry) -> io::Result<()>;
+    fn insert(&mut self, token: &Entry) -> io::Result<()>;
     fn test(&self, token: &Entry) -> bool;
 
-    fn test_and_insert(&self, token: &Entry) -> io::Result<bool> {
+    fn test_and_insert(&mut self, token: &Entry) -> io::Result<bool> {
         let is_new = self.test(token);
         if is_new {
             self.insert(token)?;
