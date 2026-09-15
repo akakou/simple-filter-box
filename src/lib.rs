@@ -9,6 +9,9 @@ pub mod bloom_filter;
 #[cfg(feature = "dashmap")]
 pub mod dashmap;
 
+#[cfg(feature = "hashmap")]
+pub mod hashmap;
+
 #[cfg(test)]
 mod tests {
     use super::*;
