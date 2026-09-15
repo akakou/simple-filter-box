@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, sync::Mutex};
 
 use bloomfilter::Bloom;
 
@@ -7,7 +7,7 @@ use crate::core::{FilterBox, bytes::Long};
 const BLOOM_SEED: [u8; 32] = [0u8; 32];
 
 pub struct BloomFilterBox {
-    inner: Bloom<Long>,
+    inner: Mutex<Bloom<Long>>,
 }
 
 impl BloomFilterBox {
@@ -15,13 +15,14 @@ impl BloomFilterBox {
         let bit_len = bit_len.max(8);
         let hash_functions = hash_functions.max(1);
         let bitmap_size = (bit_len + 7) / 8;
-        let items = ((bit_len as f64 * std::f64::consts::LN_2)
-            / hash_functions as f64)
-            .ceil() as usize;
+        let items =
+            ((bit_len as f64 * std::f64::consts::LN_2) / hash_functions as f64).ceil() as usize;
         let items = items.max(1);
         let inner = Bloom::new_with_seed(bitmap_size, items, &BLOOM_SEED)
             .expect("bloomfilter init should succeed");
-        Self { inner }
+        Self {
+            inner: Mutex::new(inner),
+        }
     }
 
     pub fn with_rate(expected_items: usize, false_positive_rate: f64) -> Self {
@@ -29,13 +30,15 @@ impl BloomFilterBox {
         let p = false_positive_rate.clamp(1e-9, 0.5);
         let inner = Bloom::new_for_fp_rate_with_seed(n, p, &BLOOM_SEED)
             .expect("bloomfilter init should succeed");
-        Self { inner }
+        Self {
+            inner: Mutex::new(inner),
+        }
     }
 }
 
 impl FilterBox for BloomFilterBox {
     fn from_entries(tokens: &[Long]) -> io::Result<Self> {
-        let mut filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
+        let filter = BloomFilterBox::with_rate(tokens.len(), 0.01);
 
         for t in tokens {
             filter.insert(&t)?;
@@ -44,13 +47,31 @@ impl FilterBox for BloomFilterBox {
         Ok(filter)
     }
 
-    fn insert(&mut self, token: &Long) -> io::Result<()> {
-        self.inner.set(token);
+    fn insert(&self, token: &Long) -> io::Result<()> {
+        self.inner
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "bloom filter lock poisoned"))?
+            .set(token);
         Ok(())
     }
 
     fn test(&self, token: &Long) -> bool {
-        !self.inner.check(token)
+        self.inner
+            .lock()
+            .map(|inner| !inner.check(token))
+            .unwrap_or(false)
+    }
+
+    fn test_and_insert(&self, token: &Long) -> io::Result<bool> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "bloom filter lock poisoned"))?;
+        let is_new = !inner.check(token);
+        if is_new {
+            inner.set(token);
+        }
+        Ok(is_new)
     }
 }
 

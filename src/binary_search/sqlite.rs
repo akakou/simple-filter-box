@@ -1,9 +1,6 @@
-use crate::core::{bytes::Long, FilterBox};
+use crate::core::{FilterBox, bytes::Long};
 use rusqlite::{Connection, OptionalExtension};
-use std::{
-    io,
-    path::{Path},
-};
+use std::{io, path::Path};
 
 const CREATE_TABLE_SQL: &str = r#"
     create table if not exists dedup_tokens (
@@ -17,7 +14,8 @@ pub struct SqliteFilter {
 
 impl SqliteFilter {
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let conn = Connection::open(path).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        let conn =
+            Connection::open(path).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
         conn.execute(CREATE_TABLE_SQL, [])
             .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
         Ok(Self { conn })
@@ -25,11 +23,11 @@ impl SqliteFilter {
 }
 
 impl FilterBox for SqliteFilter {
-    fn from_entries(tokens: &[Long]) -> io::Result<Self> {
+    fn from_entries(_tokens: &[Long]) -> io::Result<Self> {
         todo!();
     }
 
-    fn insert(&mut self, token: &Long) -> io::Result<()> {
+    fn insert(&self, token: &Long) -> io::Result<()> {
         self.conn
             .execute(
                 "insert or ignore into dedup_tokens (token) values (?1)",
@@ -65,8 +63,8 @@ impl FilterBox for SqliteFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path() -> PathBuf {
         let mut path = std::env::temp_dir();
