@@ -7,7 +7,23 @@ pub struct HashMapFilterBox {
     inner: HashMap<Entry, ()>,
 }
 
+impl HashMapFilterBox {
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: HashMap::with_capacity(capacity),
+        }
+    }
+}
+
+
 impl FilterBox for HashMapFilterBox {
+    
     fn from_entries(tokens: &[Entry]) -> io::Result<Self> {
         Ok(Self {
             inner: 
